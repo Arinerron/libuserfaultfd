@@ -52,7 +52,6 @@ static void *race_userfault(void *data_ptr2) {
 
     struct pollfd evt = { .fd = ufd, .events = POLLIN };
     while (poll(&evt, 1, -1) > 0) {
-        /* unexpected poll events */
         if (evt.revents & POLLERR) {
             perror("race_userfault got evt.revents & POLLERR");
             exit(-1);
