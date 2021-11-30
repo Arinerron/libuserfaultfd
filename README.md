@@ -13,6 +13,8 @@ $ make
 # make install
 ```
 
+The library will be installed to `/usr/lib/libuserfaultfd.so`, and the heaer file will be installed to `/usr/include/libuserfaultfd.h`.
+
 # Usage
 
 ```c
