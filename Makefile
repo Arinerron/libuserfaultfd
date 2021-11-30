@@ -1,6 +1,6 @@
 .PHONY : clean
 
-CPPFLAGS= -fPIC -g -I$(LIBUSERFAULTFD_INCDIR)
+CPPFLAGS= -fPIC -g -I$(LIBUSERFAULTFD_INCDIR) -static
 LDFLAGS= -shared
 
 INCDIR=/usr/include
