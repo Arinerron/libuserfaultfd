@@ -35,6 +35,7 @@ struct race_s {
     void *ptr;
     size_t size;
     void (*func2)(void *);
+    size_t n;
 };
 
 
@@ -44,7 +45,10 @@ static void *race_userfault(void *data_ptr2) {
     void *ptr = data_ptr->ptr;
     size_t size = data_ptr->size;
     void (*func2)(void *) = data_ptr->func2;
+    size_t n = data_ptr->n;
     free(data_ptr2);
+
+    size_t cur_n = 0;
 
     struct pollfd evt = { .fd = ufd, .events = POLLIN };
     while (poll(&evt, 1, -1) > 0) {
@@ -71,7 +75,9 @@ static void *race_userfault(void *data_ptr2) {
         }
 
         if (correct_addr) {
-            func2(ptr);
+            if (++i == n) {
+                func2(ptr);
+            }
 
             struct uffdio_copy copy = {
                 .dst = (long)ptr,
@@ -82,7 +88,9 @@ static void *race_userfault(void *data_ptr2) {
                 perror("race_userfault got error in ioctl(UFFDIO_COPY)");
                 exit(-1);
             }
-            break;
+
+            if (i == n)
+                break;
         }
     }
 
@@ -94,7 +102,7 @@ static void *race_userfault(void *data_ptr2) {
 //////////
 
 
-size_t race(size_t size, void (*func1)(void *), void (*func2)(void *)) {
+size_t race(size_t size, void (*func1)(void *), void (*func2)(void *), size_t n) {
     size = PAGESZ(size);
     assert(size != 0);
 
@@ -136,7 +144,9 @@ size_t race(size_t size, void (*func1)(void *), void (*func2)(void *)) {
         return 0;
     }
 
-    struct race_s data = { .ufd = fd, .ptr = ptr, .size = size, .func2 = func2 };
+    struct race_s data = { .ufd = fd, .ptr = ptr, .size = size, .func2 = func2, .n = n };
+    // NOTE: we have to use the heap because this is in a diff thread and the 
+    // parent could return before child accesses the struct race_s.
     struct race_s *data_ptr = malloc(sizeof(struct race_s));
     memcpy(data_ptr, &data, sizeof(struct race_s));
 
