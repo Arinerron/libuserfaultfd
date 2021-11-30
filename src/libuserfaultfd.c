@@ -1,23 +1,52 @@
 #include "libuserfaultfd.h"
 
 #include <linux/userfaultfd.h>
-#include <stdint.h>
 #include <sys/mman.h>
 #include <sys/user.h>
+#include <sys/ioctl.h>
+#include <sys/msg.h>
+#include <sys/shm.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <stdint.h>
+#include <stddef.h>
 #include <assert.h>
+#include <poll.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <string.h>
+#include <pthread.h>
 
 #define PAGESZ(sz) (!(sz) ? PAGE_SIZE : (((sz)-1) >> 12 << 12) + PAGE_SIZE)
 
-static void *_CURRENT_ADDRESS = 0xbbb000;
+static void *_CURRENT_ADDRESS = (void *)0xbbb000;
 
 static inline int userfaultfd(int flags) {
     return syscall(SYS_userfaultfd, flags);
 }
 
 
-static race_userfault(void *ptr, size_t size, void (*func2)(void *)) {
-    struct pollfd evt = { .fd = ufd, .events = POLLIN };
+struct race_s {
+    int ufd;
+    void *ptr;
+    size_t size;
+    void (*func2)(void *);
+};
 
+
+static void *race_userfault(void *data_ptr2) {
+    struct race_s *data_ptr = (struct race_s *)data_ptr2;
+    int ufd = data_ptr->ufd;
+    void *ptr = data_ptr->ptr;
+    size_t size = data_ptr->size;
+    void (*func2)(void *) = data_ptr->func2;
+    free(data_ptr2);
+
+    struct pollfd evt = { .fd = ufd, .events = POLLIN };
     while (poll(&evt, 1, -1) > 0) {
         /* unexpected poll events */
         if (evt.revents & POLLERR) {
@@ -35,7 +64,7 @@ static race_userfault(void *ptr, size_t size, void (*func2)(void *)) {
         }
 
         char *place = (char *)fault_msg.arg.pagefault.address;
-        int correct_addr = place >= ptr && place < ptr + size;
+        int correct_addr = (void *)place >= ptr && (void *)place < ptr + size;
         if (fault_msg.event != UFFD_EVENT_PAGEFAULT || !correct_addr) {
             fprintf(stderr, "race_userfault got unexpected UFFD_EVENT_PAGEFAULT");
             exit(-1);
@@ -97,7 +126,7 @@ size_t race(size_t size, void (*func1)(void *), void (*func2)(void *)) {
     struct uffdio_register reg = {
         .mode = UFFDIO_REGISTER_MODE_MISSING,
         .range = {
-            .start = ptr,
+            .start = (uintptr_t)ptr,
             .len = size
         }
     };
@@ -107,8 +136,12 @@ size_t race(size_t size, void (*func1)(void *), void (*func2)(void *)) {
         return 0;
     }
 
+    struct race_s data = { .ufd = fd, .ptr = ptr, .size = size, .func2 = func2 };
+    struct race_s *data_ptr = malloc(sizeof(struct race_s));
+    memcpy(data_ptr, &data, sizeof(struct race_s));
+
     pthread_t thread;
-    pthread_create(&thread, NULL, race_userfault, ptr, size, func2);
+    pthread_create(&thread, NULL, race_userfault, (void *)data_ptr);
     
     func1(ptr);
 
